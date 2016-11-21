@@ -1,5 +1,5 @@
-﻿(function (hangFire) {
-    hangFire.Metrics = (function() {
+(function (hangfire) {
+    hangfire.Metrics = (function() {
         function Metrics() {
             this._metrics = {};
         }
@@ -36,41 +36,71 @@
         return Metrics;
     })();
 
-    hangFire.RealtimeGraph = (function() {
-        function RealtimeGraph(element, succeeded, failed) {
+    var BaseGraph = function () {
+        this.height = 200;
+    };
+
+    BaseGraph.prototype.update = function () {
+        var graph = this._graph;
+
+        var width = $(graph.element).innerWidth();
+        if (width !== graph.width) {
+            graph.configure({
+                width: width,
+                height: this.height
+            });
+        }
+
+        graph.update();
+    };
+
+    BaseGraph.prototype._initGraph = function (element, settings, xSettings, ySettings) {
+        var graph = this._graph = new Rickshaw.Graph($.extend({
+            element: element,
+            width: $(element).innerWidth(),
+            height: this.height,
+            interpolation: 'linear',
+            stroke: true
+        }, settings));
+
+        this._hoverDetail = new Rickshaw.Graph.HoverDetail({
+            graph: graph,
+            yFormatter: function (y) { return Math.floor(y); },
+            xFormatter: function (x) { return moment(new Date(x * 1000)).format("LLLL"); }
+        });
+
+        if (xSettings) {
+            this._xAxis = new Rickshaw.Graph.Axis.Time($.extend({ graph: graph }, xSettings));
+        }
+
+        if (ySettings) {
+            this._yAxis = new Rickshaw.Graph.Axis.Y($.extend({
+                graph: graph,
+                tickFormat: Rickshaw.Fixtures.Number.formatKMBT
+            }, ySettings));
+        }
+
+        graph.render();
+    }
+
+    hangfire.RealtimeGraph = (function() {
+        function RealtimeGraph(element, succeeded, failed, succeededStr, failedStr) {
             this._succeeded = succeeded;
             this._failed = failed;
-            
-            this._graph = new Rickshaw.Graph({
-                element: element,
-                width: $(element).innerWidth(),
-                height: 200,
-                renderer: 'bar',
-                interpolation: 'linear',
-                stroke: true,
 
+            this._initGraph(element, {
+                renderer: 'bar',
                 series: new Rickshaw.Series.FixedDuration([
-                        { name: 'failed', color: '#d9534f' },
-                        { name: 'succeeded', color: '#5cb85c' }
+                        { name: failedStr, color: '#d9534f' },
+                        { name: succeededStr, color: '#5cb85c' }
                 ],
                     undefined,
                     { timeInterval: 2000, maxDataPoints: 100 }
                 )
-            });
-
-            var xAxis = new Rickshaw.Graph.Axis.Time({ graph: this._graph });
-            var yAxis = new Rickshaw.Graph.Axis.Y({
-                graph: this._graph,
-                tickFormat: Rickshaw.Fixtures.Number.formatKMBT
-            });
-
-            var hoverDetail = new Rickshaw.Graph.HoverDetail({
-                graph: this._graph,
-                yFormatter: function (y) { return Math.floor(y); }
-            });
-
-            this._graph.render();
+            }, null, {});
         }
+
+        RealtimeGraph.prototype = Object.create(BaseGraph.prototype);
 
         RealtimeGraph.prototype.appendHistory = function (statistics) {
             var newSucceeded = parseInt(statistics["succeeded:count"].intValue);
@@ -88,58 +118,33 @@
             this._failed = newFailed;
         };
 
-        RealtimeGraph.prototype.update = function() {
-            this._graph.update();
-        };
-
         return RealtimeGraph;
     })();
 
-    hangFire.HistoryGraph = (function() {
-        function HistoryGraph(element, succeeded, failed) {
-            this._graph = new Rickshaw.Graph({
-                element: element,
-                width: $(element).innerWidth(),
-                height: 200,
+    hangfire.HistoryGraph = (function() {
+        function HistoryGraph(element, succeeded, failed, succeededStr, failedStr) {
+            this._initGraph(element, {
                 renderer: 'area',
-                interpolation: 'linear',
-                stroke: true,
                 series: [
                     {
                         color: '#d9534f',
                         data: failed,
-                        name: 'Failed'
+                        name: failedStr
                     }, {
                         color: '#6ACD65',
                         data: succeeded,
-                        name: 'Succeeded'
+                        name: succeededStr
                     }
                 ]
-            });
-
-            var xAxis = new Rickshaw.Graph.Axis.Time({ graph: this._graph });
-            var yAxis = new Rickshaw.Graph.Axis.Y({
-                graph: this._graph,
-                tickFormat: Rickshaw.Fixtures.Number.formatKMBT,
-                tickTreatment: 'glow'
-            });
-            
-            var hoverDetail = new Rickshaw.Graph.HoverDetail({
-                graph: this._graph,
-                yFormatter: function(y) { return Math.floor(y); }
-            });
-
-            this._graph.render();
+            }, {}, { ticksTreatment: 'glow' });
         }
 
-        HistoryGraph.prototype.update = function() {
-            this._graph.update();
-        };
+        HistoryGraph.prototype = Object.create(BaseGraph.prototype);
 
         return HistoryGraph;
     })();
 
-    hangFire.StatisticsPoller = (function() {
+    hangfire.StatisticsPoller = (function() {
         function StatisticsPoller(metricsCallback, statisticsUrl, pollInterval) {
             this._metricsCallback = metricsCallback;
             this._listeners = [];
@@ -187,7 +192,7 @@
         return StatisticsPoller;
     })();
 
-    hangFire.Page = (function() {
+    hangfire.Page = (function() {
         function Page(config) {
             this._metrics = new Hangfire.Metrics();
 
@@ -197,15 +202,15 @@
                 config.pollUrl,
                 config.pollInterval);
 
-            this._initialize();
+            this._initialize(config.locale);
             this._createGraphs();
             this._poller.start();
         }
 
         Page.prototype._createGraphs = function() {
-            this.realtimeGraph = this._createRealtimeGraph('realtimeGraph');
-            this.historyGraph = this._createHistoryGraph('historyGraph');
-            
+            var realtime = this.realtimeGraph = this._createRealtimeGraph('realtimeGraph');
+            var history = this.historyGraph = this._createHistoryGraph('historyGraph');
+
             var debounce = function (fn, timeout) {
                 var timeoutId = -1;
                 return function() {
@@ -216,22 +221,21 @@
                 };
             };
 
-            var self = this;
             window.onresize = debounce(function () {
-                $('#realtimeGraph').html('');
-                $('#historyGraph').html('');
-
-                self._createGraphs();
+                realtime.update();
+                history.update();
             }, 125);
         };
 
         Page.prototype._createRealtimeGraph = function(elementId) {
             var realtimeElement = document.getElementById(elementId);
-            var succeeded = parseInt($(realtimeElement).data('succeeded'));
-            var failed = parseInt($(realtimeElement).data('failed'));
-
             if (realtimeElement) {
-                var realtimeGraph = new Hangfire.RealtimeGraph(realtimeElement, succeeded, failed);
+                var succeeded = parseInt($(realtimeElement).data('succeeded'));
+                var failed = parseInt($(realtimeElement).data('failed'));
+
+                var succeededStr = $(realtimeElement).data('succeeded-string');
+                var failedStr = $(realtimeElement).data('failed-string');
+                var realtimeGraph = new Hangfire.RealtimeGraph(realtimeElement, succeeded, failed, succeededStr, failedStr);
 
                 this._poller.addListener(function (data) {
                     realtimeGraph.appendHistory(data);
@@ -261,13 +265,17 @@
                 var succeeded = createSeries($(historyElement).data("succeeded"));
                 var failed = createSeries($(historyElement).data("failed"));
 
-                return new Hangfire.HistoryGraph(historyElement, succeeded, failed);
+                var succeededStr = $(historyElement).data('succeeded-string');
+                var failedStr = $(historyElement).data('failed-string');
+
+                return new Hangfire.HistoryGraph(historyElement, succeeded, failed, succeededStr, failedStr);
             }
 
             return null;
         };
 
-        Page.prototype._initialize = function() {
+        Page.prototype._initialize = function (locale) {
+            moment.locale(locale);
             var updateRelativeDates = function () {
                 $('*[data-moment]').each(function () {
                     var $this = $(this);
@@ -327,13 +335,13 @@
                 var confirmText = $this.data('confirm');
 
                 if (!confirmText || confirm(confirmText)) {
+                    $this.prop('disabled');
                     var loadingDelay = setTimeout(function() {
                         $this.button('loading');
                     }, 100);
 
                     $.post($this.data('ajax'), function() {
                         clearTimeout(loadingDelay);
-                        $this.button('reset');
                         window.location.reload();
                     });
                 }
@@ -443,13 +451,13 @@
                     }).get();
 
                     if (!confirmText || confirm(confirmText)) {
+                        $this.prop('disabled');
                         var loadingDelay = setTimeout(function () {
                             $this.button('loading');
                         }, 100);
 
                         $.post($this.data('url'), { 'jobs[]': jobs }, function () {
                             clearTimeout(loadingDelay);
-                            $this.button('reset');
                             window.location.reload();
                         });
                     }

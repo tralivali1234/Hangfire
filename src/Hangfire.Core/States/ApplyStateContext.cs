@@ -20,11 +20,11 @@ using Hangfire.Storage;
 
 namespace Hangfire.States
 {
+#pragma warning disable 618
     public class ApplyStateContext : StateContext
+#pragma warning restore 618
     {
-        private readonly BackgroundJob _backgroundJob;
-        
-        internal ApplyStateContext(
+        public ApplyStateContext(
             [NotNull] IWriteOnlyTransaction transaction, 
             [NotNull] ElectStateContext context)
             : this(context.Storage, context.Connection, transaction, context.BackgroundJob, context.CandidateState, context.CurrentState)
@@ -39,13 +39,13 @@ namespace Hangfire.States
             [NotNull] IState newState, 
             [CanBeNull] string oldStateName)
         {
-            if (storage == null) throw new ArgumentNullException("storage");
-            if (connection == null) throw new ArgumentNullException("connection");
-            if (transaction == null) throw new ArgumentNullException("transaction");
-            if (backgroundJob == null) throw new ArgumentNullException("backgroundJob");
-            if (newState == null) throw new ArgumentNullException("newState");
+            if (storage == null) throw new ArgumentNullException(nameof(storage));
+            if (connection == null) throw new ArgumentNullException(nameof(connection));
+            if (transaction == null) throw new ArgumentNullException(nameof(transaction));
+            if (backgroundJob == null) throw new ArgumentNullException(nameof(backgroundJob));
+            if (newState == null) throw new ArgumentNullException(nameof(newState));
             
-            _backgroundJob = backgroundJob;
+            BackgroundJob = backgroundJob;
 
             Storage = storage;
             Connection = connection;
@@ -56,22 +56,21 @@ namespace Hangfire.States
         }
 
         [NotNull]
-        public JobStorage Storage { get; private set; }
+        public JobStorage Storage { get; }
 
         [NotNull]
-        public IStorageConnection Connection { get; private set; }
+        public IStorageConnection Connection { get; }
 
         [NotNull]
-        public IWriteOnlyTransaction Transaction { get; private set; }
-
-        [NotNull]
-        public override BackgroundJob BackgroundJob { get { return _backgroundJob; } }
+        public IWriteOnlyTransaction Transaction { get; }
+        
+        public override BackgroundJob BackgroundJob { get; }
 
         [CanBeNull]
-        public string OldStateName { get; private set; }
+        public string OldStateName { get; }
 
         [NotNull]
-        public IState NewState { get; private set; }
+        public IState NewState { get; }
         
         public TimeSpan JobExpirationTimeout { get; set; }
     }
