@@ -56,7 +56,7 @@ namespace Hangfire.SqlServer
                 {
                     var result = UseTransaction((connection, transaction) =>
                     {
-                        return connection.Query(sqlQuery, transaction: transaction).Select(x => (string) x.Queue).ToList();
+                        return connection.Query(sqlQuery, transaction: transaction, commandTimeout: _storage.CommandTimeout).Select(x => (string) x.Queue).ToList();
                     });
 
                     _queuesCache = result;
@@ -79,12 +79,14 @@ where r.row_num between @start and @end";
 
             return UseTransaction((connection, transaction) =>
             {
+                // TODO: Remove cast to `int` to support `bigint`.
                 return connection.Query<JobIdDto>(
                     sqlQuery,
                     new { queue = queue, start = from + 1, end = @from + perPage },
-                    transaction)
+                    transaction,
+                    commandTimeout: _storage.CommandTimeout)
                     .ToList()
-                    .Select(x => x.JobId)
+                    .Select(x => (int)x.JobId)
                     .ToList();
             });
         }
@@ -101,7 +103,7 @@ select count(Id) from [{_storage.SchemaName}].JobQueue with (nolock) where [Queu
 
             return UseTransaction((connection, transaction) =>
             {
-                var result = connection.ExecuteScalar<int>(sqlQuery, new { queue = queue }, transaction);
+                var result = connection.ExecuteScalar<int>(sqlQuery, new { queue = queue }, transaction, commandTimeout: _storage.CommandTimeout);
 
                 return new EnqueuedAndFetchedCountDto
                 {
@@ -118,7 +120,7 @@ select count(Id) from [{_storage.SchemaName}].JobQueue with (nolock) where [Queu
         private class JobIdDto
         {
             [UsedImplicitly]
-            public int JobId { get; set; }
+            public long JobId { get; set; }
         }
     }
 }

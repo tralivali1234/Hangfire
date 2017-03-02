@@ -122,7 +122,7 @@ namespace Hangfire.SqlServer
             return UseConnection<IList<ServerDto>>(connection =>
             {
                 var servers = connection.Query<Entities.Server>(
-                    $@"select * from [{_storage.SchemaName}].Server with (nolock)")
+                    $@"select * from [{_storage.SchemaName}].Server with (nolock)", commandTimeout: _storage.CommandTimeout)
                     .ToList();
 
                 var result = new List<ServerDto>();
@@ -211,8 +211,9 @@ namespace Hangfire.SqlServer
                 var enqueuedJobIds = tuple.Monitoring.GetEnqueuedJobIds(tuple.Queue, 0, 5);
                 var counters = tuple.Monitoring.GetEnqueuedAndFetchedCount(tuple.Queue);
 
+                // TODO: Remove the Select method call to support `bigint`.
                 var firstJobs = UseConnection(connection => 
-                    EnqueuedJobs(connection, enqueuedJobIds.ToArray()));
+                    EnqueuedJobs(connection, enqueuedJobIds.Select(x => (long)x).ToArray()));
 
                 result.Add(new QueueWithTopEnqueuedJobsDto
                 {
@@ -231,7 +232,8 @@ namespace Hangfire.SqlServer
             var queueApi = GetQueueApi(queue);
             var enqueuedJobIds = queueApi.GetEnqueuedJobIds(queue, from, perPage);
 
-            return UseConnection(connection => EnqueuedJobs(connection, enqueuedJobIds.ToArray()));
+            // TODO: Remove the Select method call to support `bigint`.
+            return UseConnection(connection => EnqueuedJobs(connection, enqueuedJobIds.Select(x => (long)x).ToArray()));
         }
 
         public JobList<FetchedJobDto> FetchedJobs(string queue, int @from, int perPage)
@@ -239,7 +241,8 @@ namespace Hangfire.SqlServer
             var queueApi = GetQueueApi(queue);
             var fetchedJobIds = queueApi.GetFetchedJobIds(queue, from, perPage);
 
-            return UseConnection(connection => FetchedJobs(connection, fetchedJobIds));
+            // TODO: Remove the Select method call to support `bigint`.
+            return UseConnection(connection => FetchedJobs(connection, fetchedJobIds.Select(x => (long)x).ToArray()));
         }
 
         public IDictionary<DateTime, long> HourlySucceededJobs()
@@ -263,7 +266,7 @@ select * from [{_storage.SchemaName}].Job with (nolock) where Id = @id
 select * from [{_storage.SchemaName}].JobParameter with (nolock) where JobId = @id
 select * from [{_storage.SchemaName}].State with (nolock) where JobId = @id order by Id desc";
 
-                using (var multi = connection.QueryMultiple(sql, new { id = jobId }))
+                using (var multi = connection.QueryMultiple(sql, new { id = jobId }, commandTimeout: _storage.CommandTimeout))
                 {
                     var job = multi.Read<SqlJob>().SingleOrDefault();
                     if (job == null) return null;
@@ -333,7 +336,7 @@ select count(*) from [{0}].[Set] with (nolock) where [Key] = N'recurring-jobs';
             var statistics = UseConnection(connection =>
             {
                 var stats = new StatisticsDto();
-                using (var multi = connection.QueryMultiple(sql))
+                using (var multi = connection.QueryMultiple(sql, commandTimeout: _storage.CommandTimeout))
                 {
                     stats.Enqueued = multi.ReadSingle<int>();
                     stats.Failed = multi.ReadSingle<int>();
@@ -397,7 +400,8 @@ where [Key] in @keys";
 
             var valuesMap = connection.Query(
                 sqlQuery,
-                new { keys = keyMaps.Keys })
+                new { keys = keyMaps.Keys },
+                commandTimeout: _storage.CommandTimeout)
                 .ToDictionary(x => (string)x.Key, x => (long)x.Count);
 
             foreach (var key in keyMaps.Keys)
@@ -428,7 +432,7 @@ where [Key] in @keys";
             return _storage.UseConnection(action);
         }
 
-        private JobList<EnqueuedJobDto> EnqueuedJobs(DbConnection connection, int[] jobIds)
+        private JobList<EnqueuedJobDto> EnqueuedJobs(DbConnection connection, long[] jobIds)
         {
             string enqueuedJobsSql = 
 $@"select j.*, s.Reason as StateReason, s.Data as StateData 
@@ -438,7 +442,8 @@ where j.Id in @jobIds";
 
             var jobs = connection.Query<SqlJob>(
                 enqueuedJobsSql,
-                new { jobIds = jobIds })
+                new { jobIds = jobIds },
+                commandTimeout: _storage.CommandTimeout)
                 .ToDictionary(x => x.Id, x => x);
 
             var sortedSqlJobs = jobIds
@@ -465,7 +470,8 @@ where j.Id in @jobIds";
 
             var count = connection.ExecuteScalar<int>(
                  sqlQuery,
-                 new { state = stateName, limit = _jobListLimit });
+                 new { state = stateName, limit = _jobListLimit },
+                 commandTimeout: _storage.CommandTimeout);
 
             return count;
         }
@@ -508,7 +514,8 @@ order by j.Id desc";
 
             var jobs = connection.Query<SqlJob>(
                         jobsSql,
-                        new { stateName = stateName, start = @from + 1, end = @from + count })
+                        new { stateName = stateName, start = @from + 1, end = @from + count },
+                        commandTimeout: _storage.CommandTimeout)
                         .ToList();
 
             return DeserializeJobs(jobs, selector);
@@ -542,7 +549,7 @@ order by j.Id desc";
             return new JobList<TDto>(result);
         }
 
-        private JobList<FetchedJobDto> FetchedJobs(DbConnection connection, IEnumerable<int> jobIds)
+        private JobList<FetchedJobDto> FetchedJobs(DbConnection connection, IEnumerable<long> jobIds)
         { 
             string fetchedJobsSql = 
 $@"select j.*, s.Reason as StateReason, s.Data as StateData 
@@ -552,7 +559,8 @@ where j.Id in @jobIds";
 
             var jobs = connection.Query<SqlJob>(
                 fetchedJobsSql,
-                new { jobIds = jobIds })
+                new { jobIds = jobIds },
+                commandTimeout: _storage.CommandTimeout)
                 .ToList();
 
             var result = new List<KeyValuePair<string, FetchedJobDto>>(jobs.Count);

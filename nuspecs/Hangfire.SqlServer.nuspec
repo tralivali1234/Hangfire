@@ -14,8 +14,14 @@
     <tags>Hangfire SqlServer SqlAzure LocalDB</tags>
     <releaseNotes>http://hangfire.io/blog/
     
+1.6.9
+• Fixed – `TimeoutException` on large arguments or large batches via `SqlServerOptions.CommandTimeout`.
+
+1.6.8
+• Fixed – Use `long` where possible instead of `int` for background job identifiers, full support will be in 1.7.0.
+    
 1.6.7
-• Fixed – "An invalid application lock time-out was passed to xp_userlock" exception when lock timeout is too high.
+• Fixed – Validation added to avoid "An invalid application lock time-out" exceptions (by t0mburton).
     
 1.6.6
 • Fixed – SqlServerJobQueue class doesn't use obsolete InvisibilityTimeout parameter anymore.

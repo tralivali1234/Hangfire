@@ -74,7 +74,8 @@ where Queue in @queues";
                     fetchedJob = connection.Query<FetchedJob>(
                         fetchJobSqlTemplate,
                         new { queues = queues },
-                        transaction).SingleOrDefault();
+                        transaction,
+                        commandTimeout: _storage.CommandTimeout).SingleOrDefault();
 
                     if (fetchedJob != null)
                     {
@@ -113,18 +114,18 @@ $@"insert into [{_storage.SchemaName}].JobQueue (JobId, Queue) values (@jobId, @
 
             connection.Execute(
                 enqueueJobSql, 
-                new { jobId = int.Parse(jobId), queue = queue }
+                new { jobId = long.Parse(jobId), queue = queue }
 #if !NETFULL
                 , transaction
 #endif
-                );
+                , commandTimeout: _storage.CommandTimeout);
         }
 
         [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
         private class FetchedJob
         {
-            public int Id { get; set; }
-            public int JobId { get; set; }
+            public long Id { get; set; }
+            public long JobId { get; set; }
             public string Queue { get; set; }
         }
     }
