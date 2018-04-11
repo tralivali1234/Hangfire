@@ -58,7 +58,7 @@ Usage
 
 This is an incomplete list of features; to see all of them, check the [official site](http://hangfire.io) and the [documentation](http://docs.hangfire.io).
 
-[**Fire-and-forget tasks**](http://docs.hangfire.io/en/latest/users-guide/background-methods/calling-methods-in-background.html)
+[**Fire-and-forget tasks**](http://docs.hangfire.io/en/latest/background-methods/calling-methods-in-background.html)
 
 Dedicated worker pool threads execute queued background jobs as soon as possible, shortening your request's processing time.
 
@@ -66,7 +66,7 @@ Dedicated worker pool threads execute queued background jobs as soon as possible
 BackgroundJob.Enqueue(() => Console.WriteLine("Simple!"));
 ```
 
-[**Delayed tasks**](http://docs.hangfire.io/en/latest/users-guide/background-methods/calling-methods-with-delay.html)
+[**Delayed tasks**](http://docs.hangfire.io/en/latest/background-methods/calling-methods-with-delay.html)
 
 Scheduled background jobs are executed only after a given amount of time.
 
@@ -74,7 +74,7 @@ Scheduled background jobs are executed only after a given amount of time.
 BackgroundJob.Schedule(() => Console.WriteLine("Reliable!"), TimeSpan.FromDays(7));
 ```
 
-[**Recurring tasks**](http://docs.hangfire.io/en/latest/users-guide/background-methods/performing-recurrent-tasks.html)
+[**Recurring tasks**](http://docs.hangfire.io/en/latest/background-methods/performing-recurrent-tasks.html)
 
 Recurring jobs have never been simpler; just call the following method to perform any kind of recurring task using the [CRON expressions](http://en.wikipedia.org/wiki/Cron#CRON_expression).
 
@@ -127,6 +127,15 @@ Please see the [Extensions](http://hangfire.io/extensions.html) page on the offi
 
 Building the sources
 ---------------------
+
+Prerequesities:
+* [Razor Generator](https://marketplace.visualstudio.com/items?itemName=DavidEbbo.RazorGenerator): Required if you intend to edit the cshtml files.
+* Install the MSMQ service (Microsoft Message Queue Server), if not already installed.
+
+Then, create an environment variable with Variable name `Hangfire_SqlServer_ConnectionStringTemplate` and put your connection string in the Variable value field. Example:
+
+* Variable name: `Hangfire_SqlServer_ConnectionStringTemplate`
+* Variable value: `Data Source=.\sqlexpress;Initial Catalog=Hangfire.SqlServer.Tests;Integrated Security=True;`
 
 To build a solution and get assembly files, just run the following command. All build artifacts, including `*.pdb` files, will be placed into the `build` folder. **Before proposing a pull request, please use this command to ensure everything is ok.** Btw, you can execute this command from the Package Manager Console window.
 
