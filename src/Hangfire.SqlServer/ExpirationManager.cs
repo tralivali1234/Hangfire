@@ -16,8 +16,8 @@
 
 using System;
 using System.Data.Common;
-using System.Data.SqlClient;
 using System.Threading;
+using Hangfire.Common;
 using Hangfire.Logging;
 using Hangfire.Server;
 using Hangfire.Storage;
@@ -28,8 +28,6 @@ namespace Hangfire.SqlServer
     internal class ExpirationManager : IServerComponent
 #pragma warning restore 618
     {
-        private static readonly ILog Logger = LogProvider.For<ExpirationManager>();
-
         private const string DistributedLockKey = "locks:expirationmanager";
         private static readonly TimeSpan DefaultLockTimeout = TimeSpan.FromMinutes(5);
         
@@ -49,6 +47,7 @@ namespace Hangfire.SqlServer
             "Hash",
         };
 
+        private readonly ILog _logger = LogProvider.For<ExpirationManager>();
         private readonly SqlServerStorage _storage;
         private readonly TimeSpan _checkInterval;
 
@@ -64,7 +63,7 @@ namespace Hangfire.SqlServer
         {
             foreach (var table in ProcessedTables)
             {
-                Logger.Debug($"Removing outdated records from the '{table}' table...");
+                _logger.Debug($"Removing outdated records from the '{table}' table...");
 
                 UseConnectionDistributedLock(_storage, connection =>
                 {
@@ -74,18 +73,16 @@ namespace Hangfire.SqlServer
                     {
                         affected = ExecuteNonQuery(
                             connection,
-                            GetQuery(_storage.SchemaName, table),
-                            cancellationToken,
-                            new SqlParameter("@count", NumberOfRecordsInSinglePass),
-                            new SqlParameter("@now", DateTime.UtcNow));
+                            GetExpireQuery(_storage.SchemaName, table),
+                            cancellationToken);
 
                     } while (affected == NumberOfRecordsInSinglePass);
                 });
 
-                Logger.Trace($"Outdated records removed from the '{table}' table.");
+                _logger.Trace($"Outdated records removed from the '{table}' table.");
             }
 
-            cancellationToken.WaitHandle.WaitOne(_checkInterval);
+            cancellationToken.Wait(_checkInterval);
         }
 
         public override string ToString()
@@ -115,7 +112,7 @@ namespace Hangfire.SqlServer
             {
                 // DistributedLockTimeoutException here doesn't mean that outdated records weren't removed.
                 // It just means another Hangfire server did this work.
-                Logger.Log(
+                _logger.Log(
                     LogLevel.Debug,
                     () => $@"An exception was thrown during acquiring distributed lock on the {DistributedLockKey} resource within {DefaultLockTimeout.TotalSeconds} seconds. Outdated records were not removed.
 It will be retried in {_checkInterval.TotalSeconds} seconds.",
@@ -123,33 +120,13 @@ It will be retried in {_checkInterval.TotalSeconds} seconds.",
             }
         }
 
-        private static string GetQuery(string schemaName, string table)
+        private static string GetExpireQuery(string schemaName, string table)
         {
-            // Okay, let me explain all the bells and whistles in this query:
-            //
-            // SET TRANSACTION... is to prevent a query from running, when a
-            // higher isolation level was set, for example, when it was leaked:
-            // http://www.levibotelho.com/development/plugging-isolation-leaks-in-sql-server.
-            //
-            // LOOP JOIN hint is here to prevent merge or hash joins, that
-            // cause index scan operators, and they are unacceptable, because
-            // may block running background jobs.
-            //
-            // OPTIMIZE FOR instructs engine to generate better plan that
-            // causes much fewer logical reads, because of additional sorting
-            // before querying data in nested loops. The value was discovered
-            // in practice.
-            //
-            // READPAST hint is used to simply skip blocked records, because
-            // it's better to ignore them instead of waiting for unlock.
-            //
-            // TOP is to prevent lock escalations that may cause background
-            // processing to stop, and to avoid larger batches to rollback
-            // in case of connection/process termination.
-
-            return
-$@"set transaction isolation level read committed;
-delete top (@count) from [{schemaName}].[{table}] with (readpast) 
+            return $@"
+set deadlock_priority low;
+set transaction isolation level read committed;
+set lock_timeout 1000;
+delete top (@count) from [{schemaName}].[{table}]
 where ExpireAt < @now
 option (loop join, optimize for (@count = 20000));";
         }
@@ -157,22 +134,31 @@ option (loop join, optimize for (@count = 20000));";
         private static int ExecuteNonQuery(
             DbConnection connection,
             string commandText,
-            CancellationToken cancellationToken,
-            params SqlParameter[] parameters)
+            CancellationToken cancellationToken)
         {
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = commandText;
-                command.Parameters.AddRange(parameters);
                 command.CommandTimeout = 0;
 
-                using (cancellationToken.Register(state => ((SqlCommand)state).Cancel(), command))
+                var countParameter = command.CreateParameter();
+                countParameter.ParameterName = "@count";
+                countParameter.Value = NumberOfRecordsInSinglePass;
+
+                var nowParameter = command.CreateParameter();
+                nowParameter.ParameterName = "@now";
+                nowParameter.Value = DateTime.UtcNow;
+
+                command.Parameters.Add(countParameter);
+                command.Parameters.Add(nowParameter);
+
+                using (cancellationToken.Register(state => ((DbCommand)state).Cancel(), command))
                 {
                     try
                     {
                         return command.ExecuteNonQuery();
                     }
-                    catch (SqlException) when (cancellationToken.IsCancellationRequested)
+                    catch (DbException) when (cancellationToken.IsCancellationRequested)
                     {
                         // Exception was triggered due to the Cancel method call, ignoring
                         return 0;

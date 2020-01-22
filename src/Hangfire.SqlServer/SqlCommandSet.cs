@@ -25,21 +25,35 @@ namespace Hangfire.SqlServer
     {
         public  static readonly bool IsAvailable;
 
-        private static readonly Type SqlCommandSetType;
+        private static readonly Type SqlCommandSetType = null;
         private readonly object _instance;
 
-        private static readonly Action<object, SqlConnection> SetConnection;
-        private static readonly Action<object, SqlTransaction> SetTransaction;
-        private static readonly Func<object, SqlCommand> GetBatchCommand;
-        private static readonly Action<object, SqlCommand> AppendMethod;
-        private static readonly Func<object, int> ExecuteNonQueryMethod;
-        private static readonly Action<object> DisposeMethod;
+        private static readonly Action<object, SqlConnection> SetConnection = null;
+        private static readonly Action<object, SqlTransaction> SetTransaction = null;
+        private static readonly Func<object, SqlCommand> GetBatchCommand = null;
+        private static readonly Action<object, SqlCommand> AppendMethod = null;
+        private static readonly Func<object, int> ExecuteNonQueryMethod = null;
+        private static readonly Action<object> DisposeMethod = null;
 
         static SqlCommandSet()
         {
             try
             {
                 var typeAssembly = typeof(SqlCommand).GetTypeInfo().Assembly;
+                var version = typeAssembly.GetName().Version;
+
+                if (Version.Parse("4.0.0.0") < version && version < Version.Parse("4.6.0.0"))
+                {
+                    // .NET Core version of the System.Data.SqlClient package below 4.7.0 (which
+                    // has assembly version 4.6.0.0) doesn't properly implement the SqlCommandSet
+                    // class, throwing the following exception in run-time:
+                    // ArgumentException: Specified parameter name 'Parameter1' is not valid.
+                    // GitHub Issue: https://github.com/dotnet/corefx/issues/29391
+
+                    IsAvailable = false;
+                    return;
+                }
+
                 SqlCommandSetType = typeAssembly.GetType("System.Data.SqlClient.SqlCommandSet");
 
                 if (SqlCommandSetType == null) return;
